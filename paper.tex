@@ -1,9 +1,24 @@
 \documentclass[a4paper,12pt,titlepage,oneside]{article}     
 
-\usepackage{t1enc}
 \usepackage[latin1]{inputenc}
-\usepackage[english]{babel}
-\usepackage{biblatex}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage[czech,english]{babel}
+\usepackage[
+	backend=biber,
+	autolang=other,
+	style=iso-numeric,
+	sorting=none,
+  bibencoding=UTF8]{biblatex}
+\usepackage{csquotes}
+\usepackage{xifthen}
+\usepackage{amsmath}
+\usepackage{amsthm}
+\usepackage{algorithm}
+\usepackage[noend]{algpseudocode}
+\usepackage{mathabx}
+
+\newtheorem*{remark}{Remark}
 
 \addbibresource{references.bib}
 
@@ -33,10 +48,8 @@ addressing and atomic operations.
 Graphs are very useful in many areas of computer science, mathematics and other fields. They provide an effective and intuitive modeling tool that can be
 easily applied to many real-world problems. With the advent of internet, vast amount of data is being collected and stored in various forms, graph storage
 being one of them. Graphs of social network user interactions, customer behavior, articles or on-line videos are used virtually everywhere and they contain
-massive amounts of data. Searching and querying this data thus takes a long time and it may be benefical to experiment with other architectures than the
-classic processor for this task, for example graphic cards.
-
-\parspace Graphics processing units are no longer used solely for graphics rendering and image manipulation. Several easy to grasp runtimes and libraries
+massive amounts of data. Searching and querying this data thus takes a long time and it may be benefical to experiment with non-traditional approaches to
+this problem. Graphics processing units are no longer used solely for graphics rendering and image manipulation. Several easy to grasp runtimes and libraries
 (such as CUDA and OpenCL) allow developers to harness the raw power of thousands of GPU cores for many interesting applications including e.g. machine learning,
 bio-inspired algorithms, hash cracking and other tasks that can benefit from a massively parallel approach.
 This paper explores the possibility of accelerating selected graph search algorithms on GPUs using CUDA.
@@ -44,9 +57,14 @@ This paper explores the possibility of accelerating selected graph search algori
 
 \begin{section}{State of the art}
 
+% http://arsenalfc.stanford.edu/papers/ppopp070a-hong.pdf
+% http://arxiv.org/pdf/1002.4482v1.pdf
+% http://www.idav.ucdavis.edu/~yzhwang/gpugraph.pdf
+% http://impact.crhc.illinois.edu/shared/papers/effective2010.pdf
+% http://download.springer.com/static/pdf/349/chp%253A10.1007%252F978-3-540-77220-0_21.pdf?originUrl=http%3A%2F%2Flink.springer.com%2Fchapter%2F10.1007%2F978-3-540-77220-0_21&token2=exp=1459951338~acl=%2Fstatic%2Fpdf%2F349%2Fchp%25253A10.1007%25252F978-3-540-77220-0_21.pdf%3ForiginUrl%3Dhttp%253A%252F%252Flink.springer.com%252Fchapter%252F10.1007%252F978-3-540-77220-0_21*~hmac=bc7e61ea2cddcdd4840334b2158cababbe85901cdb96415d87011521fc2211db
 \end{section}
 
-\begin{section}{CUDA overview}
+\begin{section}{CUDA}
 CUDA is a development platform and a programming interface (API) created by Nvidia that allows programmers to execute (almost) arbitrary code directly on the
 GPU. This simplifies the development process for general computing on graphic cards, because without it developers had to model all problems and algorithms
 in explicit graphic resources such as vertices and textures. CUDA has been released in 2007 and since then it had several revisions with new features added, the newest version is 7.5. It supports C, C++ and Fortran (the main languages used in scientific computing), but it has bindings for many more languages.
@@ -56,23 +74,286 @@ of the code that will be executed by the GPU. This code is then compiled by the 
 \parspace Each CUDA-enabled device has a global device memory and several multiprocessors, each with it's own shared memory, registers and processors.
 The multiprocessors execute functions (called \textit{kernels}) in warps, groups of 32 threads. Because the threads are being executed in groups and they
 share a lot of resources (memory and registers), it is beneficial to execute the same path for every thread. That means that for optimal performance,
-conditions in code should be minimized. The memory of the GPU and CPU is not shared, so any memory movements have to be done explicitly by the programmer.
+conditions in code should be minimized. The CUDA threads are organized into blocks and those are further organized into a grid. Blocks and grids can be
+one, two or three dimensional. There is a limit on how many threads can be in each dimension of the block and it is up to the developer to choose the optimal
+configuration. Each kernel is then launched on one thread which has access to its position within the block and the position of its block within the grid.
+This is usually used to index into an array, matrix, image or other data structure to identify the work that is to be done by the given thread.
+
+\parspace The memory of the GPU and CPU is not shared, so any memory movements have to be done explicitly by the programmer.
 Typical CUDA computation first transfers data from CPU to GPU memory, than starts parallel computation on the GPU and when the computation is finished,
 the results are gathered back to the CPU. The memory transfer from CPU to GPU and vice versa is a slow operation and it should be ideally avoided as
 much as possible. The gap between CPU and GPU memory is somewhat alleviated in newer CUDA versions that provide unified memory. With this function, the CPU
 can map a portion of it's address space and provide direct access for the GPU to access this area of memory. The newest CUDA architecture, Pascal, will even
 allow to intertwine the address spaces of the processor and the graphic device to create one large address space that is accessible by both of them. That will
 allow to further simplify the development process, because the GPU will be able to access memory allocated on the processor without requiring to use any special
-allocation functions\cite{CUDAPascal}.
+allocation functions \cite{CUDAPascal}.
 \end{section}
 
 \begin{section}{Algorithm overview}
+\label{sec:AlgorithmOverview}
+This chapter provides a short theoretical background on graphs and then follows up with a CPU and GPU implementation of two graph problems, namely determining
+whether two vertices are connected and finding shortest path between two vertices in a weighted graph.
+An unordered graph G = (V, E) is a tuple containing a set of vertices V and a set of edges E. The edges are two element subsets of the set V. Informally, the
+edges represent a certain relationship between two vertices. In a real-world example, an edge could denote a friendship on a social network or a road connecting
+two junctions in a road network. Each edge and vertex can have associated values, for example a road may contain a value that represents it's length or width.
+Neighbor of a vertex is some other vertex that is connected to it by an edge. Vertices sharing an edge are also called adjacent.
+A walk is an alternating sequence of vertices and edges. A walk with no repeated edges is called a trail and a trail with no repeated vertices is called a
+path. Vertices are said to be connected if a path exists between them. A cycle is a walk that begins and ends with the same vertex and has at least one edge.
+
+\subsection{Breadth-first search}
+An elementary algorithm that serves to traverse all vertices and edges in a graph is called breadth-first search (BFS).
+Its traditional description can be found in most books about algorithms, such as \cite{IntroductionToAlgorithms}. A streamlined description of the algorithm,
+that stays close to it's implementation, will be described here. BFS receives a graph and a source vertex as an input. It puts the source vertex into a queue
+and then repeatedly takes a vertex from the queue, marks it as visited and puts all of it's unvisited neighbors into the queue. This is repeated until the queue
+is empty, which signals that the whole graph has been traversed. The algorithm explores the graph gradually in levels. In each level there are vertices that have
+the same number of edges in their path to the source vertex. Because of this we can easily find the shortest distances (for unweighted graphs) and paths between
+the source vertex and all other vertices in unweighted graphs. Pseudocode for the algorithm is given below. The function \texttt{CreateQueue} creates a queue,
+\texttt{IsEmpty} returns \texttt{true} if the given queue is empty and \texttt{Enqueue} puts an element into a queue. Because it traverses every vertex and
+every edge of the graph exactly once, its asymptotic complexity is \(O(|V| + |E|)\). Strictly speaking, the algorithm doesn't necessarily traverse the whole
+graph, it traverses the component containing the source vertex (although that component is by itself a graph too). A component of an undirected graph is
+its subgraph in which any pair of vertices is connected.
+
+\begin{algorithm}
+\caption{Breadth-first search}\label{alg:Bfs}
+\begin{algorithmic}[1]
+\Procedure{BFS}{G, s}
+	\ForAll{v $\in$ G}
+		\State $visited[v]\gets \text{false}$
+	\EndFor
+	\State
+	\State $q\gets \Call{CreateQueue}$
+	\State $\Call{Enqueue}{q, s}$
+	\State
+	\While{not $\Call{IsEmpty}{q}$}
+			\State $v\gets \Call{Pop}{q}$
+			\State $visited[v]\gets \text{true}$
+			
+			\ForAll{$e \in \Call{Neighbors}{v}$}
+				\If{not $visited[e]$}
+					\State $\Call{Enqueue}{q, e}$
+				\EndIf
+			\EndFor
+	\EndWhile
+\EndProcedure
+\end{algorithmic}
+\end{algorithm}
+
+\subsection{Determining vertex connectivity}
+The first problem examined in this paper is determining whether two vertices are connected. Given two vertices \textit{u} and \textit{v} we have to
+find if there is a path from u to v (or vice versa, if we assume an undirected graph). This can be easily checked with BFS. We conduct breadth-first search
+with source vertex set to \textit{u} and if \textit{v} is marked as visited after the search, we know that there is a path between \textit{u} and \textit{v}.
+If we do not visit \textit{v}, it is either in a different component than \textit{u} or it isn't even in the graph. The search can be stopped earlier if we quit
+the BFS when \textit{v} is about to be inserted to the queue, because in that moment we already know that it will be visited, so it is not necessary to continue
+with the search.
+
+\begin{remark}
+Other approaches for determining vertex connectivity and finding shortest paths exist, for example landmark labeling \cite{PrunedLabeling}.
+Those are not discussed in this paper, because they are not suited for a GPU implementation and this paper focuses on accelerating classic CPU graph
+algorithms on GPUs.
+\end{remark}
+
+\subsection{Determining shortest path}
+The second - more important - algorithm that is examined by this paper is  the single-source shortest path problem (SSSP). It builds upon the vertex
+connectivity problem described earlier, but it does not just check whether two vertices are connected. It computes the shortest distance between two vertices,
+that is the length of the shortest path between them. The length is calculated by adding weights of all the edges along the (shortest) path.
+As the name implies, SSSP finds the shortest path from a single vertex (source) to all the other vertices. Several algorithms exist for this problem.
+In the simplest case where all edges have the same weight (or no weight at all), a simple BFS suffices. It visits the vertices in order of edge count distance
+from the source (first all vertices connected by a single edge, then all vertices connected by two edges etc.). If all the edges have the same weight, this implies
+that there can be no shorter path by visiting them in any other order. But if the weights are not all the same, different algorithms have to be used.
+
+\subsubsection{Dijkstra's algorithm}
+One of the most commonly used algorithms for this problem is Dijkstra's algorithm, as it is fast and also relatively easy to implement.
+It builds upon BFS but it takes edge weights into account. In addition to marking vertices as visited and keeping a queue of currently processed vertices,
+it also stores the current shortest distance for every vertex. At the beginning of the algorithm, the distances are initialized to infinity
+(a large value in practice) and the source vertex gets a distance of 0. In every iteration, vertex with the current lowest distance from the source is selected.
+It is then marked as visited and its neighbours are traversed. If an edge that would lower the shortest distance to a neighbour is found, the neighbour's shortest
+distance is updated and it is put into the queue (if it's not already there). This behaviour can be observed in algorithm \ref{alg:dijkstra}.
+\texttt{EdgeWeight(u, v)} returns the weight of the edge connecting \textit{u} with \textit{v}.
+The procedure \texttt{PopShortest} returns the vertex with the shortest current path to the source from the queue. Implementation of this function afflicts
+the complexity of the algorithm. If it is implemented by a naive linear scan, the complexity will be \(O(|V|^2)\) - all vertices are traversed and for every vertex,
+we have to scan all of the other vertices in the queue (in the worst case). This can be improved by using some form on a min-priority queue, which reduces the
+complexity to \(O(|E| + |V| log |V|)\), as the scan only takes \(log |V|\) on average.
+
+\begin{algorithm}
+\caption{Dijkstra's algorithm}\label{alg:Dijkstra}
+\begin{algorithmic}[1]
+\Procedure{Dijkstra}{G, s}
+	\ForAll{v $\in$ G}
+		\State $visited[v]\gets \text{false}$
+		\State $distance[v]\gets \text{infinity}$
+	\EndFor
+	\State $distance[s]\gets \text{0}$
+	\State $q\gets \Call{CreateQueue}$
+	\State $\Call{Enqueue}{q, s}$
+	\State
+	\While{not $\Call{IsEmpty}{q}$}
+			\State $v\gets \Call{PopShortest}{q}$
+			\State $visited[v]\gets \text{true}$
+			
+			\ForAll{$e \in \Call{Neighbors}{v}$}
+				\If{$distance[v] + \Call{EdgeWeight}{v, e} < distance[e]$}
+					\State $distance[e]\gets distance[v] + \Call{EdgeWeight}{v, e}$
+					\State $\Call{Enqueue}{q, e}$
+				\EndIf
+			\EndFor
+	\EndWhile
+\EndProcedure
+\end{algorithmic}
+\end{algorithm}
+
+\begin{remark}
+In this case we limit ourselves to graphs that only have edges with positive weights and that contain no negative cycles (cycle with negative length).
+Negative weights are not very common in real-world data and if they exist, they can be often transformed to positive weights by re-evaluating the whole graph.
+This limitation is in place because the presented Dijkstra's algorithm does not work with those graphs.
+\end{remark}
+\end{section}
+
+\begin{section}{Implementation overview}
+This section provides implementation details of problems discussed in section \ref{sec:AlgorithmOverview}.
+
+\subsection{Graph representation}
+Graphs can be represented in computers in many ways. One of them is an adjacency matrix, which has dimensions \(V \bigtimes V\). Element
+at index \(i, j\) is marked as \texttt{true} if there is an edge between vertices \textit{i} and \textit{j} and \texttt{false} if there is no such edge.
+In weighted graphs the elements can represent edge weights instead of simple boolean values. This representation can quickly tell if two vertices are adjacent,
+however it has \(O(V)\) complexity for traversing neighbours of a vertex and its memory complexity is \(V^2\) and that makes it impractical for graphs
+with many vertices. Another common representation is an adjacency list. That consists of keeping a list of vertices and a list of edges for each of the vertices.
+Memory complexity of this list is \(O(V + E)\), which makes it suitable even for large graphs.
+
+\subsection{Determining vertex connectivity}
+This algorithm can be implemented with a simple BFS on the CPU. The implementation can be straightforwardly deduced from the pseudocode given for BFS
+in algorithm \ref{alg:Bfs}. This paper uses an implementation that uses adjacency lists.
+
+\parspace The GPU implementation requires a slightly different approach because this iterative kind of algorithm is not easily mapped onto a massively parallel
+architecture. The approach taken in this paper is based on the work of Harish and Narayanan \cite{CUDAAcceleratedGraph} and optimizes it by using modern
+CUDA features. BFS is still used, but it has to be modified. In each iteration of the BFS, one level of vertices is explored in parallel.
+That means that the number of iterations will be at most equal to the longest path between two vertices in the graph.
+In every iteration each vertex gets a separate thread. Each such thread then checks if its vertex is in the queue and if it is,
+it is marked as visited and its unvisited neighbours are inserted into the queue. The threads are launched in two-dimensional blocks (which are launched only in
+the x axis) and their position is then flattened into one dimension for indexing into the vertex array. To simplify the layout and ease of access to the graph,
+the edges are linearized before their transfer to the GPU. A compact list of edges is created and the vertices have an index into this list and a number that
+tells them how many edges they have. At the start of the algorithm, the vertices and edges are offloaded onto the GPU. Then an advancing kernel is launched on the GPU repeatedly until the destination vertex is found or there are no vertices in the queue.
+
+\parspace The CPU has to be notified about the fact that the BFS should end. In the original implementation from
+\cite{CUDAAcceleratedGraph}, a single boolean variable is used. Before every kernel launch, it is copied to the GPU with the value \texttt{true}.
+If any thread is put into the queue, the variable is set to \texttt{false}. After the kernel finishes, the variable is copied back to the CPU and if
+it is not \texttt{false}, the algorithm ends.
+% TODO: Verify with experiments
+This copying incurs a performance cost that is being addressed in this paper. Instead of copying the variable before and after each kernel invocation, a feature
+of CUDA called unified memory is used. The memory of the variable is mapped in the CPU address space and the GPU has direct access to it, which speeds up the
+algorithm.
+
+\parspace Another thing that is implemented differently in the GPU version is the queue. Keeping an explicit queue would be impractical because of
+synchronization needs. Instead every vertex has an attribute that tells whether the vertex is in queue or not and thus each thread can easily work with
+this attribute in parallel.
+This however introduces another problem. The kernels are launched in such a way that every vertex gets its own thread, but in reality the GPU only has hundreds
+or thousands of threads and it cannot cover all of the vertices at once. Because of that the threads are reused for a different set of vertices after
+their kernel finishes.
+
+\parspace That implies that the vertices are not all processed in parallel. A vertex can be added to the queue to be processed in the next level, but in reality
+it may be processed in the same level because its thread will be invoked after the thread that put it into the queue. This situation could actually occur even
+if all the threads would work in parallel, if some of them were executing slower. In other words there is a data race that has to be addressed. This problem is solved in the original implementation by doing two kernel invocations per each level of BFS. The first invocation marks the threads that are about to be added to the queue but it is the second one that actually marks them as being in the queue.
+This prevents the erroneous situation described earlier, but it also slows down the program as two kernels have to be launched per each BFS level. In this paper a different approach is used instead that does not require two kernels. Every iteration in a single BFS gets a number \textit{i}, starting at zero and incrementing
+with every iteration. Then instead of keeping a simple boolean mark at every vertex that tells whether it is the queue, an integer \textit{visit\_index} that represents the iteration in which the vertex should be in queue is used. At the start of the algorithm, all vertices have this number set to a special value
+that represents an unvisited index (the maximum value of 32-bit signed integer is used) and the source vertex's number is set to 0.
+At every iteration, \textit{i} is compared with the vertex's \textit{visit\_index} and if they match, the vertex is considered to be in the queue. If a vertex is
+about to be added to the queue, it's \textit{visit\_index} is set to \(i + 1\). That ensures that the vertex will not be processed until the next BFS iteration and the data race problem is solved.
+
+\parspace The pseudocode for the BFS kernel is given in algorithm \ref{alg:BfsGPU}. \textit{V} is an array of vertices, \textit{E} is an array of edges,
+\textit{BFS\_ID} stores the id of the current BFS iteration, \textit{T} represents the id of the current destination vertex. \textit{STOP} is a variable that signals
+the stopping condition of the algorithm to the CPU, \textit{STOP\_EARLY} signals that the destination vertex has been found and the algorithm should terminate
+and finally \textit{SIZE} is the count of the vertices in the graph. The function \texttt{DetermineIndex} determines the index of the CUDA thread that is
+executing this kernel. \texttt{visit\_id} attribute returns the BFS iteration id in which the given vertex should be visited. \textit{VISITED} is a constant
+that marks vertex as visited (it can be a negative value or a large positive value). The function \texttt{Edges} returns the edges connected to the given
+vertex. Note that this kernel is launched once for every vertex in the graph and it is mapped onto CUDA threads, which means that hundreds of its invocations
+are happening in parallel. The assignments to the variables \textit{STOP} and \textit{STOP\_EARLY} thus should be theoretically executed using atomic operations.
+The same holds for querying and updating the \texttt{visit\_id} in the cycle. In practice, storing a value into a properly aligned memory on x86 and x86-64
+platforms should be atomic by itself and given the fact that all of the threads write the same value to this memory in one invocation of the kernel, the
+atomic operations are not necessary here.
+
+\begin{algorithm}
+\caption{Breadth-first search kernel on GPU}\label{alg:BfsGPU}
+\begin{algorithmic}[1]
+\Procedure{BFS-kernel}{V, E, BFS\_ID, T, STOP, STOP\_EARLY, SIZE}
+	\State $tid\gets \Call{DetermineIndex}$
+	
+	\If{$tid \ge SIZE$}
+		\State $return$
+	\EndIf
+
+	\If{$V[tid].visit\_id \ne BFS\_ID$}
+		\State $return$
+	\EndIf
+
+	\State $ $
+
+	\State $V[tid].visit\_id\gets \text{VISITED}$
+	\State $STOP\gets \text{false}$
+	\If{$tid = T$}
+		\State $STOP\_EARLY\gets \text{true}$
+	\EndIf
+	
+	\State $ $
+	
+	\For{$e \in \Call{Edges}{V[tid]}$}
+		\If {$V[e].visit\_id \ne \text{VISITED}$}
+			\State $V[e].visit\_id\gets BFS\_ID + 1$
+		\EndIf
+	\EndFor
+\EndProcedure
+\end{algorithmic}
+\end{algorithm}
+
+\subsection{Determining shortest path}
+	The CPU algorithm for the SSSP problem can be directly derived from the pseudocode given in algorithm \ref{alg:Dijkstra}.
+	The GPU implementation is similar to the BFS kernel, except for setting the stopping condition putting vertices into the queue.
+	A pseudocode for the kernel is given in algorithm \ref{alg:DijkstraGPU}. The parameters for the kernel have the same meaning as in the BFS kernel.
+	The \texttt{distance} returns for the given vertex its current shortest distance from the source vertex. The function \texttt{Cost} returns the cost
+	of the given edge. Storing value into the variable \textit{STOP} does not need to be explicitly atomic (as explained in the description of algorithm
+	\ref{alg:BfsGPU}), changing the cost of a vertex has to be atomic, because different threads can assign different values to the cost in one
+	kernel invocation and that causes race issues. The CUDA atomic function \texttt{atomicMin} is a perfect fit for this, as we can use
+	\(atomicMin(V[e].cost, new\_distance)\), which will set \(V[e].cost\) to the minimum of the two parameters and thus correctly update the cost.
+	
+	\begin{algorithm}
+	\caption{Dijkstra's algorithm kernel on GPU}\label{alg:BfsDijkstra}
+	\begin{algorithmic}[1]
+	\Procedure{BFS-kernel}{V, E, BFS\_ID, T, STOP, SIZE}
+		\State $tid\gets \Call{DetermineIndex}$
+		
+		\If{$tid \ge SIZE$}
+			\State $return$
+		\EndIf
+
+		\If{$V[tid].visit\_id \ne BFS\_ID$}
+			\State $return$
+		\EndIf
+
+		\State $ $
+
+		\State $V[tid].visit\_id\gets \text{VISITED}$
+		\State $distance\gets V[tid].distance$
+		
+		\State $ $
+		
+		\For{$e \in \Call{Edges}{V[tid]}$}
+			\State $new\_distance\gets distance + \Call{Cost}{e}$
+			\If {$new\_distance < V[e].cost$}
+				\State $V[e].cost\gets new\_distance$
+				\State $STOP\gets \text{false}$
+			\EndIf
+		\EndFor
+	\EndProcedure
+	\end{algorithmic}
+	\end{algorithm}
 \end{section}
 
 \begin{section}{Experimental results}
 \end{section}
 
 \begin{section}{Conclusion}
+Even though path querying in graphs is not directly suited for a GPU implementation, it is possible to implement it efficiently. The GPU implementation
+will be usually slower for small and medium sized graphs, but if the graphs are large enough (e.g. millions of vertices and more), it can eventually beat the
+CPU implementation. This approach demonstrates that even highly iterative tasks, such as graph traversal, can be transformed into an algorithm that can
+run efficiently on the GPU and make use of its many cores.
 \end{section}
 
 \printbibliography

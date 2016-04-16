@@ -39,3 +39,8 @@
 *.xdy
 *.tdo
 *.pdf
+*.tmp
+*.synctex
+*.thm
+*.tcp
+*.tps
