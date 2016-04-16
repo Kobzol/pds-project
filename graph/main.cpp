@@ -13,8 +13,9 @@
 #include "graph.h"
 #include "graph_cuda.h"
 #include "graph_cpu.h"
+#include "graph_harnar.h"
 
-std::default_random_engine engine((unsigned int) time(nullptr));
+std::default_random_engine engine(1);
 
 void generate_graph(size_t vertexCount, size_t degree, std::vector<Vertex>& vertices)
 {
@@ -117,13 +118,15 @@ int main()
 	GraphCPU cpu;
 	cpu.vertices = g.vertices;
 
+	GraphHarnar harnar;
+	harnar.vertices = g.vertices;
+
 	std::uniform_int_distribution<int> randomGenerator(0, (int) g.vertices.size() - 1);
 
 	std::cout << "Load finished" << std::endl;
 
-	long gpu_total = 0;
-	long cpu_total = 0;
-	const size_t ITERATION_COUNT = 100;
+	long times[3] = { 0 };
+	const size_t ITERATION_COUNT = 30;
 
 	for (int i = 0; i < ITERATION_COUNT; i++)
 	{
@@ -131,21 +134,31 @@ int main()
 		int to = randomGenerator(engine);
 		
 		Timer timer;
-		unsigned int resultGPU = g.is_connected(from, to);
-		gpu_total += timer.get_millis();
+		unsigned int resultCPU = cpu.get_shortest_path(from, to);
+		times[0] += timer.get_millis();
+		
+		timer.start();
+		unsigned int resultHarnar = harnar.get_shortest_path(from, to);
+		times[2] += timer.get_millis();
 
 		timer.start();
-		unsigned int resultCPU = cpu.is_connected(from, to);
-		cpu_total += timer.get_millis();
+		unsigned int resultGPU = g.get_shortest_path(from, to);
+		times[1] += timer.get_millis();
 
 		if (resultGPU != resultCPU)
 		{
-			std::cout << "Error at query " << i << ": expected " << resultCPU << ", got " << resultGPU << std::endl;
+			std::cout << "GPU error at query " << i << ": expected " << resultCPU << ", got " << resultGPU << std::endl;
+		}
+
+		if (resultHarnar != resultCPU)
+		{
+			std::cout << "Harnar error at query " << i << ": expected " << resultCPU << ", got " << resultHarnar << std::endl;
 		}
 	}
 
-	std::cout << "CPU average: " << (cpu_total / ITERATION_COUNT) << std::endl;
-	std::cout << "GPU average: " << (gpu_total / ITERATION_COUNT) << std::endl;
+	std::cout << "CPU average: " << (times[0] / ITERATION_COUNT) << std::endl;
+	std::cout << "GPU average: " << (times[1] / ITERATION_COUNT) << std::endl;
+	std::cout << "Harnar average: " << (times[2] / ITERATION_COUNT) << std::endl;
 
 	getchar();
 

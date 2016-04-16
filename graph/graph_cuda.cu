@@ -30,7 +30,7 @@ void GraphCUDA::initCuda()
 	}
 }
 
-__global__ void bfsKernel(LinearizedVertex* vertices, Edge* edges, int visitCounter, int target, bool* stop, size_t size)
+__global__ void bfsKernel(LinearizedVertex* vertices, Edge* edges, int visitCounter, int target, int* stop, size_t size)
 {
 	int offset = (blockDim.x * blockDim.y) * blockIdx.x;	// how many blocks skipped
 	int blockPos = blockDim.x * threadIdx.y + threadIdx.x;	// position in block
@@ -45,17 +45,17 @@ __global__ void bfsKernel(LinearizedVertex* vertices, Edge* edges, int visitCoun
 		int edgeCount = vertices[pos].edgeCount;
 		int edgeIndex = vertices[pos].edgeIndex;
 
-		stop[0] = false;
+		stop[0] = 0;
 		if (pos == target)
 		{
-			stop[1] = true;
+			stop[1] = 1;
 		}
 
 		for (size_t i = 0; i < edgeCount; i++)
 		{
 			int edge = edges[edgeIndex + i].target;
 
-			if (vertices[edge].visitIndex != CUDA_VISITED)
+			if (vertices[edge].visitIndex != CUDA_VISITED)	// TODO atomic
 			{
 				vertices[edge].visitIndex = visitCounter + 1;
 			}
@@ -77,7 +77,7 @@ bool GraphCUDA::is_connected(int from, int to)
 
 	CudaMemory<LinearizedVertex> verticesCuda(graphSize, &(this->linearizedVertices[0]));
 	CudaMemory<Edge> edgesCuda(this->edges.size(), &(this->edges[0]));
-	CudaHostMemory<bool> stopCuda(2);
+	CudaHostMemory<int> stopCuda(2);
 	int visitCounter = 0;
 
 	// computation
@@ -85,15 +85,15 @@ bool GraphCUDA::is_connected(int from, int to)
 	int blockCount = (graphSize / (blockDim.x * blockDim.y)) + 1;
 	dim3 gridDim(blockCount, 1);
 
-	bool* stopHost = stopCuda.host();
-	stopHost[0] = false;
+	int* stopHost = stopCuda.host();
+	stopHost[0] = 0;
 
 	while (!stopHost[0])
 	{
-		stopHost[0] = true;
+		stopHost[0] = 1;
 
 		bfsKernel << <gridDim, blockDim >> >(*verticesCuda, *edgesCuda, visitCounter, to, stopCuda.device(), graphSize);
-		cudaDeviceSynchronize();
+		cudaDeviceSynchronize();	// wait for kernel to end
 
 		if (stopHost[1])
 		{
@@ -106,7 +106,7 @@ bool GraphCUDA::is_connected(int from, int to)
 	return false;
 }
 
-__global__ void dijkstraKernel(LinearizedVertex* vertices, Edge* edges, unsigned int* costs, int visitCounter, bool *stop, size_t size)
+__global__ void dijkstraKernel(LinearizedVertex* vertices, Edge* edges, unsigned int* costs, int visitCounter, int* stop, size_t size)
 {
 	int offset = (blockDim.x * blockDim.y) * blockIdx.x;	// how many blocks skipped
 	int blockPos = blockDim.x * threadIdx.y + threadIdx.x;	// position in block
@@ -116,7 +116,7 @@ __global__ void dijkstraKernel(LinearizedVertex* vertices, Edge* edges, unsigned
 
 	if (vertices[pos].visitIndex == visitCounter)
 	{
-		vertices[pos].visitIndex = CUDA_NOT_VISITED;
+		vertices[pos].visitIndex = CUDA_VISITED;	// stop when T is in queue?
 		unsigned int distance = costs[pos];
 
 		int edgeCount = vertices[pos].edgeCount;
@@ -128,7 +128,7 @@ __global__ void dijkstraKernel(LinearizedVertex* vertices, Edge* edges, unsigned
 			unsigned int newDistance = distance + edge.cost;
 			if (atomicMin(&costs[edge.target], newDistance) > newDistance)
 			{
-				stop[0] = false;
+				*stop = 0;
 				vertices[edge.target].visitIndex = visitCounter + 1;
 			}
 		}
@@ -152,7 +152,7 @@ unsigned int GraphCUDA::get_shortest_path(int from, int to)
 	CudaMemory<Edge> edgesCuda(this->edges.size(), &(this->edges[0]));
 
 	CudaMemory<unsigned int> costsCuda(graphSize, 0xEE);
-	CudaHostMemory<bool> stopCuda;
+	CudaHostMemory<int> stopCuda;
 
 	// computation
 	costsCuda.store(0, 1, from);
@@ -161,15 +161,15 @@ unsigned int GraphCUDA::get_shortest_path(int from, int to)
 	int blockCount = (graphSize / (blockDim.x * blockDim.y)) + 1;
 	dim3 gridDim(blockCount, 1);
 
-	bool* stopHost = stopCuda.host();
-	*stopHost = false;
+	int* stopHost = stopCuda.host();
+	*stopHost = 0;
 
 	while (!(*stopHost))
 	{
-		*stopHost = true;
+		*stopHost = 1;
 
 		dijkstraKernel << <gridDim, blockDim >> >(*verticesCuda, *edgesCuda, *costsCuda, visitCounter, stopCuda.device(), graphSize);
-		cudaDeviceSynchronize();
+		cudaDeviceSynchronize();	// wait for kernel to end
 
 		visitCounter++;
 	}
