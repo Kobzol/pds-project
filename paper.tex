@@ -1,4 +1,4 @@
-\documentclass[a4paper,12pt,titlepage,oneside]{article}     
+\documentclass[a4paper,12pt,notitlepage,oneside]{article}     
 
 \usepackage[latin1]{inputenc}
 \usepackage[T1]{fontenc}
@@ -17,6 +17,7 @@
 \usepackage{algorithm}
 \usepackage[noend]{algpseudocode}
 \usepackage{mathabx}
+\usepackage{titling}
 
 \newtheorem*{remark}{Remark}
 
@@ -31,32 +32,44 @@
 	\par
 }
 
+\pretitle{\begin{center}\Huge\bfseries}
+\posttitle{\par\end{center}\vskip 0.5em}
+\preauthor{\begin{center}\Large\ttfamily}
+\postauthor{\end{center}}
+\predate{\par\large\centering}
+\postdate{\par}
+
 \begin{document}
 \maketitle
+\thispagestyle{empty}
 
-\begin{section}{Abstract}
-Graphs have many practical applications, they can model road and communication networks, social interactions, flow of computation or data and many
-other things. In a lot of these applications, it is often necessary to tell whether two vertices are connected and what is the distance between them.
-The vertices and edges in those graphs are often counted in millions and serial processing of path queries in such large graphs can be slow. This paper focuses
-on parallelizing graph path queries on Graphics Processing Units (GPUs) using CUDA, a framework for general purpose calculations on Nvidia graphic cards.
-Shortest path querying is inherently a very iterative process, which means that it does not map straightforwardly to a massively parallel GPU
-computation. The given mplementation of parallel path querying explores ways of overcoming this limitation by using modern CUDA features such as unified memory
-addressing and atomic operations.
-\end{section}
+\begin{abstract}
+This paper focuses on parallelizing connectivity and distance queries in undirected graphs with Graphics Processing Units (GPUs) using CUDA,
+a framework for general purpose calculations on Nvidia graphic cards.
+Graph algorithms are very iterative by their nature, which means that they do not map straightforwardly to a massively parallel GPU
+computation. This paper provides an implementation of parallel path querying that explores ways of overcoming the limitations of GPU computations by using
+modern CUDA features such as unified memory addressing and atomic operations.
+\end{abstract}
 
 \begin{section}{Introduction}
-Graphs are very useful in many areas of computer science, mathematics and other fields. They provide an effective and intuitive modeling tool that can be
-easily applied to many real-world problems. With the advent of internet, vast amount of data is being collected and stored in various forms, graph storage
-being one of them. Graphs of social network user interactions, customer behavior, articles or on-line videos are used virtually everywhere and they contain
-massive amounts of data. Searching and querying this data thus takes a long time and it may be benefical to experiment with non-traditional approaches to
-this problem. Graphics processing units are no longer used solely for graphics rendering and image manipulation. Several easy to grasp runtimes and libraries
-(such as CUDA and OpenCL) allow developers to harness the raw power of thousands of GPU cores for many interesting applications including e.g. machine learning,
-bio-inspired algorithms, hash cracking and other tasks that can benefit from a massively parallel approach.
+Graphs have many practical applications, they can model road and communication networks, social interactions, flow of computation or data, neural networks and many
+other things. They provide an effective and intuitive modeling tool that can be easily applied to many real-world problems.
+In a lot of these applications, it is often necessary to tell whether two vertices are connected and what is the distance between them.
+The vertices and edges in those graphs are often counted in millions and serial processing of path queries in such large graphs can be slow.
+Searching and querying this data thus takes a long time and it may be benefical to experiment with non-traditional approaches to
+this problem, for example using GPUs. Graphics processing units are no longer used solely for graphics rendering and image manipulation.
+Several easy to grasp runtimes and libraries (such as CUDA and OpenCL) allow developers to harness the raw power of thousands of GPU cores for many
+interesting applications including e.g. machine learning, bio-inspired algorithms, hash cracking and other tasks that can benefit from a massively parallel approach.
 This paper explores the possibility of accelerating selected graph search algorithms on GPUs using CUDA.
 \end{section}
 
 \begin{section}{State of the art}
-
+There are several approaches that try to map graph algorithms onto a massively parallel GPU architecture. This paper mainly focuses on and expands
+the work of Harish and Narayanan \cite{harnar}. Their approach involves mapping a CUDA thread to a single vertex and executing the graph algorithms in iterations.
+This paper adds modern CUDA features to their implementation to further streamline and speed up the code. This method of implementing graph algorithms
+can provide a significant speed-up over a CPU implementation, but it suffers in performance when the graph is irregular or when the average vertex degree is low.
+A solution to this problem that tries to optimize memory access and thread scheduling is presented in \cite{hongKimOguntebiOlukotun}.
+An exhaustive overview of GPU graph traversal structures, algorithms and issues is given in \cite{wangOwens}.
 % http://arsenalfc.stanford.edu/papers/ppopp070a-hong.pdf
 % http://arxiv.org/pdf/1002.4482v1.pdf
 % http://www.idav.ucdavis.edu/~yzhwang/gpugraph.pdf
@@ -72,8 +85,8 @@ Code that will run on GPU can be written in plain C or C++ with only a few chang
 of the code that will be executed by the GPU. This code is then compiled by the CUDA compiler NVCC and linked to the rest of the code that is run on CPU.
 
 \parspace Each CUDA-enabled device has a global device memory and several multiprocessors, each with it's own shared memory, registers and processors.
-The multiprocessors execute functions (called \textit{kernels}) in warps, groups of 32 threads. Because the threads are being executed in groups and they
-share a lot of resources (memory and registers), it is beneficial to execute the same path for every thread. That means that for optimal performance,
+The multiprocessors execute functions (called \textit{kernels}) in warps, groups of (currently at most) 32 threads.
+Because the threads are being executed in groups and they share a lot of resources (memory and registers), it is beneficial to execute the same path for every thread. That means that for optimal performance,
 conditions in code should be minimized. The CUDA threads are organized into blocks and those are further organized into a grid. Blocks and grids can be
 one, two or three dimensional. There is a limit on how many threads can be in each dimension of the block and it is up to the developer to choose the optimal
 configuration. Each kernel is then launched on one thread which has access to its position within the block and the position of its block within the grid.
@@ -102,16 +115,16 @@ path. Vertices are said to be connected if a path exists between them. A cycle i
 
 \subsection{Breadth-first search}
 An elementary algorithm that serves to traverse all vertices and edges in a graph is called breadth-first search (BFS).
-Its traditional description can be found in most books about algorithms, such as \cite{IntroductionToAlgorithms}. A streamlined description of the algorithm,
-that stays close to it's implementation, will be described here. BFS receives a graph and a source vertex as an input. It puts the source vertex into a queue
-and then repeatedly takes a vertex from the queue, marks it as visited and puts all of it's unvisited neighbors into the queue. This is repeated until the queue
-is empty, which signals that the whole graph has been traversed. The algorithm explores the graph gradually in levels. In each level there are vertices that have
-the same number of edges in their path to the source vertex. Because of this we can easily find the shortest distances (for unweighted graphs) and paths between
-the source vertex and all other vertices in unweighted graphs. Pseudocode for the algorithm is given below. The function \texttt{CreateQueue} creates a queue,
-\texttt{IsEmpty} returns \texttt{true} if the given queue is empty and \texttt{Enqueue} puts an element into a queue. Because it traverses every vertex and
-every edge of the graph exactly once, its asymptotic complexity is \(O(|V| + |E|)\). Strictly speaking, the algorithm doesn't necessarily traverse the whole
-graph, it traverses the component containing the source vertex (although that component is by itself a graph too). A component of an undirected graph is
-its subgraph in which any pair of vertices is connected.
+Its traditional description and proof of correctness can be found in most books about algorithms, such as \cite{IntroductionToAlgorithms}.
+A streamlined description of the algorithm that stays close to it's implementation will be described here. BFS receives a graph and a source vertex as an input.
+It puts the source vertex into a queue and then repeatedly takes a vertex from the queue, marks it as visited and puts all of it's unvisited neighbors into
+the queue. This is repeated until the queue is empty, which signals that the whole graph has been traversed. The algorithm explores the graph gradually in levels.
+In each level there are vertices that have the same number of edges in their path to the source vertex. Because of this we can easily find the shortest distances
+(for unweighted graphs) and paths between the source vertex and all other vertices in unweighted graphs. Pseudocode for the algorithm is given below.
+The function \texttt{CreateQueue} creates a queue, \texttt{IsEmpty} returns \texttt{true} if the given queue is empty and \texttt{Enqueue} puts an element
+into a queue. Because it traverses every vertex and every edge of the graph exactly once, its asymptotic complexity is \(O(|V| + |E|)\). Strictly speaking,
+the algorithm doesn't necessarily traverse the whole graph, it traverses the component containing the source vertex (although that component is by itself a graph
+too). A component of an undirected graph is its subgraph in which any pair of vertices is connected.
 
 \begin{algorithm}
 \caption{Breadth-first search}\label{alg:Bfs}
@@ -224,7 +237,7 @@ This algorithm can be implemented with a simple BFS on the CPU. The implementati
 in algorithm \ref{alg:Bfs}. This paper uses an implementation that uses adjacency lists.
 
 \parspace The GPU implementation requires a slightly different approach because this iterative kind of algorithm is not easily mapped onto a massively parallel
-architecture. The approach taken in this paper is based on the work of Harish and Narayanan \cite{CUDAAcceleratedGraph} and optimizes it by using modern
+architecture. The approach taken in this paper is based on the work of Harish and Narayanan \cite{harnar} and optimizes it by using modern
 CUDA features. BFS is still used, but it has to be modified. In each iteration of the BFS, one level of vertices is explored in parallel.
 That means that the number of iterations will be at most equal to the longest path between two vertices in the graph.
 In every iteration each vertex gets a separate thread. Each such thread then checks if its vertex is in the queue and if it is,
@@ -269,6 +282,15 @@ are happening in parallel. The assignments to the variables \textit{STOP} and \t
 The same holds for querying and updating the \texttt{visit\_id} in the cycle. In practice, storing a value into a properly aligned memory on x86 and x86-64
 platforms should be atomic by itself and given the fact that all of the threads write the same value to this memory in one invocation of the kernel, the
 atomic operations are not necessary here.
+
+\parspace The original GPU algorithm had to initialize all the vertices before each BFS kernel, to set their queue attributes to initial values.
+This incured \(O(n)\) cost for repeated BFS invocations, even though the graph was not changed between them. In my implementation I propose a different solution
+to the initialization problem. An integer that marks the number of the current BFS iteration is stored in the graph structure. Before every BFS its value is stored
+and sent to the kernel as an initial iteration value. Then every iteration it is incremented and sent to the kernel as the current iteration value. This means
+that before every kernel iteration, all of the vertices have a visit index that is below the BFS iteration value (the visit index of a vertex starts at the
+number \(0\). In the kernel we can than compare the visit index of a vertex with the initial iteration value and if the visit index is lower it means that
+the vertex hasn't been visited yet in the current BFS. We can thus invoke multiple BFS queries in a row without the need to reinitialize all the vertices.
+
 
 \begin{algorithm}
 \caption{Breadth-first search kernel on GPU}\label{alg:BfsGPU}
@@ -347,6 +369,15 @@ atomic operations are not necessary here.
 \end{section}
 
 \begin{section}{Experimental results}
+The experimental tests were conducted on a machine with 6 core Intel\textsuperscript{\textregistered} Xeon\textsuperscript{\textregistered}
+E5-4160 CPU running at 2.4 GHz. Three types of implementations are compared: CPU implementation (CPU), my GPU implementation (CUDA) and the original
+GPU implementation that this paper is based on (HarNar). The testing set is made of real-world data, specifically the road network of USA cities.
+Three sets were used, New York (264 thousand vertices, 733 thousand edges), Western USA (6 million vertices, 15 million edges) and Full USA
+(23 million vertices, 58 million edges). The graphs originate from the 9th DIMACS Implementation
+Challenge\footnote{http://www.dis.uniroma1.it/challenge9/download.shtml}. They have a relatively low average vertex degree (around 2).
+That is suboptimal for the parallel implementation, which only provides speed-up for graphs with higher degrees. To measure the benefits of the parallelized
+GPU implementation I generated a second data set by taking the three graphs and adding a small random number of edges to their vertices, thus increasing their
+average degree.
 \end{section}
 
 \begin{section}{Conclusion}
@@ -355,6 +386,8 @@ will be usually slower for small and medium sized graphs, but if the graphs are 
 CPU implementation. This approach demonstrates that even highly iterative tasks, such as graph traversal, can be transformed into an algorithm that can
 run efficiently on the GPU and make use of its many cores.
 \end{section}
+
+\clearpage
 
 \printbibliography
 
