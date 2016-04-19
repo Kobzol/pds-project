@@ -1,6 +1,7 @@
 #pragma once
 
 #include <iostream>
+#include <cassert>
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
 
@@ -10,7 +11,7 @@ static void checkCudaCall(cudaError_t error, const char* file, int line)
 	{
 		std::cout << "CUDA error at " << file << ":" << line << std::endl;
 		std::cout << cudaGetErrorName(error) << " :: " << cudaGetErrorString(error) << std::endl;
-		__debugbreak();
+		assert(0);
 	}
 }
 #define CHECK_CUDA_CALL(err) (checkCudaCall(err, __FILE__, __LINE__))

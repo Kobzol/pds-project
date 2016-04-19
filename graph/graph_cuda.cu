@@ -81,7 +81,7 @@ bool GraphCUDA::is_connected(int from, int to)
 	int visitCounter = 0;
 
 	// computation
-	dim3 blockDim(16, 16);
+	dim3 blockDim(32, 32);
 	int blockCount = (graphSize / (blockDim.x * blockDim.y)) + 1;
 	dim3 gridDim(blockCount, 1);
 
@@ -157,7 +157,7 @@ unsigned int GraphCUDA::get_shortest_path(int from, int to)
 	// computation
 	costsCuda.store(0, 1, from);
 
-	dim3 blockDim(16, 16);
+	dim3 blockDim(32, 32);
 	int blockCount = (graphSize / (blockDim.x * blockDim.y)) + 1;
 	dim3 gridDim(blockCount, 1);
 

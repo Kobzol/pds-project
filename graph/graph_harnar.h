@@ -24,6 +24,8 @@ public:
 class GraphHarnar : public Graph
 {
 public:
+	GraphHarnar() {  }
+
 	virtual int add_vertex() override;
 	virtual void add_edge(int from, int to, unsigned int cost = 1.0) override;
 

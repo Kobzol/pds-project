@@ -15,8 +15,6 @@
 #include "graph_cpu.h"
 #include "graph_harnar.h"
 
-std::default_random_engine engine(1);
-
 void generate_graph(size_t vertexCount, size_t degree, std::vector<Vertex>& vertices)
 {
 	srand((unsigned int) time(nullptr));
@@ -63,6 +61,7 @@ void load_dimacs_graph(std::string path, std::vector<Vertex>& vertices, int addi
 {
 	std::fstream graphFile(path, std::ios::in);
 	std::uniform_int_distribution<int> randomGenerator;
+	std::default_random_engine engine(1);
 
 	std::string line;
 	while (std::getline(graphFile, line))
@@ -97,52 +96,65 @@ void load_dimacs_graph(std::string path, std::vector<Vertex>& vertices, int addi
 	graphFile.close();
 }
 
+void time_alg(Graph* graph, const std::vector<Vertex>& vertices, std::string alg, std::string type, int iterations)
+{
+	volatile int result;
+	graph->vertices = vertices;
+	std::uniform_int_distribution<int> randomGenerator(0, (int) graph->vertices.size() - 1);
+	std::default_random_engine engine(1);
+	
+	Timer timer;
+	if (alg == "bfs")
+	{
+		for (int i = 0; i < iterations; i++)
+		{	
+			int from = randomGenerator(engine);
+			int to = randomGenerator(engine);
+			result = graph->is_connected(from, to);
+		}
+	}
+	else
+	{
+		for (int i = 0; i < iterations; i++)
+		{	
+			int from = randomGenerator(engine);
+			int to = randomGenerator(engine);
+			result = graph->get_shortest_path(from, to);
+		}
+	}
+	timer.print("Time " + alg + " (" + type + ")");
+
+	delete graph;
+}
+
 int main(int argc, char** argv)
 {
-	if (argc < 5) return 1;
-	// graph_name additional_edges implementation_type iteration_count algorithm_type
+	if (argc < 4)
+	{
+		std::cout << "graph_name additional_edges iteration_count" << std::endl;
+		return 1;
+	}
 
-	GraphCUDA g;
-	load_dimacs_graph(argv[1], g.vertices, std::atoi(argv[2]));
+	std::vector<Vertex> vertices;
+	load_dimacs_graph(argv[1], vertices, std::atoi(argv[2]));
 
 	size_t count = 0;
-	for (Vertex& vertex : g.vertices)
+	for (Vertex& vertex : vertices)
 	{
 		count += vertex.edges.size();
 	}
 
-	std::cout << "Average # of edges: " << count / (double) g.vertices.size() << std::endl;
+	std::cout << "Average # of edges: " << count / (double) vertices.size() << std::endl;
 
-	Graph* graph = nullptr;
-	std::string graphType = argv[3];
+	int iterationCount = std::atoi(argv[3]);
 
-	if (graphType == "cpu")
-	{
-		graph = new GraphCPU();
-	}
-	else if (graphType == "gpu")
-	{
-		graph = new GraphCUDA();
-	}
-	else graph = new GraphHarnar();
+	time_alg(new GraphCPU(), vertices, "BFS", "cpu", iterationCount);
+	time_alg(new GraphCUDA(), vertices, "BFS", "gpu", iterationCount);
+	time_alg(new GraphHarnar(), vertices, "BFS", "harnar", iterationCount);
 
-	std::cout << "Load finished" << std::endl;
-
-	std::uniform_int_distribution<int> randomGenerator(0, (int)g.vertices.size() - 1);
-	int iterationCount = std::atoi(argv[4]);
-	std::string algorithmType = argv[5];
-
-	for (int i = 0; i < iterationCount; i++)
-	{
-		int from = randomGenerator(engine);
-		int to = randomGenerator(engine);
-
-		if (algorithmType == "bfs")
-		{
-			graph->is_connected(from, to);
-		}
-		else graph->get_shortest_path(from, to);
-	}
+	time_alg(new GraphCPU(), vertices, "Dijkstra", "cpu", iterationCount);
+	time_alg(new GraphCUDA(), vertices, "Dijkstra", "gpu", iterationCount);
+	time_alg(new GraphHarnar(), vertices, "Dijkstra", "harnar", iterationCount);
 
 	/*long times[3] = { 0 };
 	const size_t ITERATION_COUNT = 30;
@@ -182,7 +194,5 @@ int main(int argc, char** argv)
 	getchar();
 	*/
 
-	delete graph;
-
-    return 0;
+   	return 0;
 }

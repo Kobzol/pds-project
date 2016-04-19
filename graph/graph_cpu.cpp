@@ -1,6 +1,8 @@
 #include "graph_cpu.h"
 #include <queue>
 #include <set>
+#include <climits>
+#include <cstddef>
 
 bool GraphCPU::is_connected(int from, int to)
 {
