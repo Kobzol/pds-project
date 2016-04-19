@@ -97,15 +97,13 @@ void load_dimacs_graph(std::string path, std::vector<Vertex>& vertices, int addi
 	graphFile.close();
 }
 
-int main()
+int main(int argc, char** argv)
 {
-	srand((unsigned int) time(nullptr));
-
-	std::vector<int> fromSelected = { 220319, 199325, 24968, 92027, 132654, 193987, 17577, 104134, 255400, 105773 };
-	std::vector<int> toSelected = { 34750, 93984, 22240, 130238, 184918, 131624, 162000, 127830, 164082, 175290 };
+	if (argc < 5) return 1;
+	// graph_name additional_edges implementation_type iteration_count algorithm_type
 
 	GraphCUDA g;
-	load_dimacs_graph("new-york.gr", g.vertices, 8);
+	load_dimacs_graph(argv[1], g.vertices, std::atoi(argv[2]));
 
 	size_t count = 0;
 	for (Vertex& vertex : g.vertices)
@@ -115,17 +113,38 @@ int main()
 
 	std::cout << "Average # of edges: " << count / (double) g.vertices.size() << std::endl;
 
-	GraphCPU cpu;
-	cpu.vertices = g.vertices;
+	Graph* graph = nullptr;
+	std::string graphType = argv[3];
 
-	GraphHarnar harnar;
-	harnar.vertices = g.vertices;
-
-	std::uniform_int_distribution<int> randomGenerator(0, (int) g.vertices.size() - 1);
+	if (graphType == "cpu")
+	{
+		graph = new GraphCPU();
+	}
+	else if (graphType == "gpu")
+	{
+		graph = new GraphCUDA();
+	}
+	else graph = new GraphHarnar();
 
 	std::cout << "Load finished" << std::endl;
 
-	long times[3] = { 0 };
+	std::uniform_int_distribution<int> randomGenerator(0, (int)g.vertices.size() - 1);
+	int iterationCount = std::atoi(argv[4]);
+	std::string algorithmType = argv[5];
+
+	for (int i = 0; i < iterationCount; i++)
+	{
+		int from = randomGenerator(engine);
+		int to = randomGenerator(engine);
+
+		if (algorithmType == "bfs")
+		{
+			graph->is_connected(from, to);
+		}
+		else graph->get_shortest_path(from, to);
+	}
+
+	/*long times[3] = { 0 };
 	const size_t ITERATION_COUNT = 30;
 
 	for (int i = 0; i < ITERATION_COUNT; i++)
@@ -159,8 +178,11 @@ int main()
 	std::cout << "CPU average: " << (times[0] / ITERATION_COUNT) << std::endl;
 	std::cout << "GPU average: " << (times[1] / ITERATION_COUNT) << std::endl;
 	std::cout << "Harnar average: " << (times[2] / ITERATION_COUNT) << std::endl;
-
+	
 	getchar();
+	*/
+
+	delete graph;
 
     return 0;
 }
