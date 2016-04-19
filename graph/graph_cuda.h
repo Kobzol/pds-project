@@ -2,7 +2,7 @@
 
 #include "graph.h"
 
-#define CUDA_NOT_VISITED (-1)
+#define CUDA_NOT_VISITED (0)
 #define CUDA_VISITED (INT_MAX)
 
 /*
@@ -39,6 +39,8 @@ private:
 	std::vector<Edge> edges;
 	std::vector<LinearizedVertex> linearizedVertices;
 	bool dirty = true;
+
+	int bfsVisitIndex = 0;
 };
 
 void cudaInit();

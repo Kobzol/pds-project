@@ -30,7 +30,7 @@ void GraphCUDA::initCuda()
 	}
 }
 
-__global__ void bfsKernel(LinearizedVertex* vertices, Edge* edges, int visitCounter, int target, int* stop, size_t size)
+__global__ void bfsKernel(LinearizedVertex* vertices, Edge* edges, int visitStart, int visitCounter, int target, int* stop, size_t size)
 {
 	int offset = (blockDim.x * blockDim.y) * blockIdx.x;	// how many blocks skipped
 	int blockPos = blockDim.x * threadIdx.y + threadIdx.x;	// position in block
@@ -40,8 +40,6 @@ __global__ void bfsKernel(LinearizedVertex* vertices, Edge* edges, int visitCoun
 
 	if (vertices[pos].visitIndex == visitCounter)
 	{
-		vertices[pos].visitIndex = CUDA_VISITED;
-
 		int edgeCount = vertices[pos].edgeCount;
 		int edgeIndex = vertices[pos].edgeIndex;
 
@@ -55,7 +53,7 @@ __global__ void bfsKernel(LinearizedVertex* vertices, Edge* edges, int visitCoun
 		{
 			int edge = edges[edgeIndex + i].target;
 
-			if (vertices[edge].visitIndex != CUDA_VISITED)	// TODO atomic
+			if (vertices[edge].visitIndex < visitStart)	// hasnt been visited in this BFS
 			{
 				vertices[edge].visitIndex = visitCounter + 1;
 			}
@@ -66,19 +64,20 @@ bool GraphCUDA::is_connected(int from, int to)
 {
 	if (!this->has_vertex(from) || !this->has_vertex(to)) return false;
 
-	this->relinearizeVertices(true);
+	this->relinearizeVertices();
 	this->initCuda();
 
 	if (this->edges.size() < 1) return false;
 
 	int graphSize = (int) this->vertices.size();
 
-	this->linearizedVertices[from].visitIndex = 0;
+	this->bfsVisitIndex++;
+	int bfsVisitStart = this->bfsVisitIndex;
+	this->linearizedVertices[from].visitIndex = bfsVisitStart;
 
 	CudaMemory<LinearizedVertex> verticesCuda(graphSize, &(this->linearizedVertices[0]));
 	CudaMemory<Edge> edgesCuda(this->edges.size(), &(this->edges[0]));
 	CudaHostMemory<int> stopCuda(2);
-	int visitCounter = 0;
 
 	// computation
 	dim3 blockDim(32, 32);
@@ -92,21 +91,19 @@ bool GraphCUDA::is_connected(int from, int to)
 	{
 		stopHost[0] = 1;
 
-		bfsKernel << <gridDim, blockDim >> >(*verticesCuda, *edgesCuda, visitCounter, to, stopCuda.device(), graphSize);
+		bfsKernel << <gridDim, blockDim >> >(*verticesCuda, *edgesCuda, bfsVisitStart, this->bfsVisitIndex++, to, stopCuda.device(), graphSize);
 		cudaDeviceSynchronize();	// wait for kernel to end
 
 		if (stopHost[1])
 		{
 			return true;
 		}
-
-		visitCounter++;
 	}
 
 	return false;
 }
 
-__global__ void dijkstraKernel(LinearizedVertex* vertices, Edge* edges, unsigned int* costs, int visitCounter, int* stop, size_t size)
+__global__ void dijkstraKernel(LinearizedVertex* vertices, Edge* edges, unsigned int* __restrict__ costs, int visitCounter, int* __restrict__ stop, size_t size)
 {
 	int offset = (blockDim.x * blockDim.y) * blockIdx.x;	// how many blocks skipped
 	int blockPos = blockDim.x * threadIdx.y + threadIdx.x;	// position in block
@@ -116,7 +113,6 @@ __global__ void dijkstraKernel(LinearizedVertex* vertices, Edge* edges, unsigned
 
 	if (vertices[pos].visitIndex == visitCounter)
 	{
-		vertices[pos].visitIndex = CUDA_VISITED;	// stop when T is in queue?
 		unsigned int distance = costs[pos];
 
 		int edgeCount = vertices[pos].edgeCount;
@@ -152,7 +148,8 @@ unsigned int GraphCUDA::get_shortest_path(int from, int to)
 	CudaMemory<Edge> edgesCuda(this->edges.size(), &(this->edges[0]));
 
 	CudaMemory<unsigned int> costsCuda(graphSize, 0xEE);
-	CudaHostMemory<int> stopCuda;
+	//CudaHostMemory<int> stopCuda;
+	CudaMemory<int> stopCuda(1, 0);
 
 	// computation
 	costsCuda.store(0, 1, from);
@@ -161,15 +158,20 @@ unsigned int GraphCUDA::get_shortest_path(int from, int to)
 	int blockCount = (graphSize / (blockDim.x * blockDim.y)) + 1;
 	dim3 gridDim(blockCount, 1);
 
-	int* stopHost = stopCuda.host();
-	*stopHost = 0;
+	//int* stopHost = stopCuda.host();
+	//*stopHost = 0;
 
-	while (!(*stopHost))
+	int stopHost = 0;
+
+	while (!(stopHost))
 	{
-		*stopHost = 1;
+		//*stopHost = 1;
+		stopCuda.store(1);
 
 		dijkstraKernel << <gridDim, blockDim >> >(*verticesCuda, *edgesCuda, *costsCuda, visitCounter, stopCuda.device(), graphSize);
 		cudaDeviceSynchronize();	// wait for kernel to end
+
+		stopCuda.load(stopHost);
 
 		visitCounter++;
 	}
@@ -195,6 +197,8 @@ void GraphCUDA::relinearizeVertices(bool force)
 			this->edges.insert(this->edges.end(), vertex.edges.begin(), vertex.edges.end());
 			this->linearizedVertices.emplace_back(edgeIndex, edgeCount);
 		}
+
+		this->bfsVisitIndex = 0;
 	}
 
 	this->dirty = false;

@@ -102,27 +102,34 @@ void time_alg(Graph* graph, const std::vector<Vertex>& vertices, std::string alg
 	graph->vertices = vertices;
 	std::uniform_int_distribution<int> randomGenerator(0, (int) graph->vertices.size() - 1);
 	std::default_random_engine engine(1);
+	int checkIterations = 3;
+	long total_time = 0L;
 	
-	Timer timer;
-	if (alg == "bfs")
+	for (int i = 0; i < checkIterations; i++)
 	{
-		for (int i = 0; i < iterations; i++)
-		{	
-			int from = randomGenerator(engine);
-			int to = randomGenerator(engine);
-			result = graph->is_connected(from, to);
+		Timer timer;
+		if (alg == "BFS")
+		{
+			for (int i = 0; i < iterations; i++)
+			{	
+				int from = randomGenerator(engine);
+				int to = randomGenerator(engine);
+				result = graph->is_connected(from, to);
+			}
 		}
-	}
-	else
-	{
-		for (int i = 0; i < iterations; i++)
-		{	
-			int from = randomGenerator(engine);
-			int to = randomGenerator(engine);
-			result = graph->get_shortest_path(from, to);
+		else if (alg == "Dijkstra")
+		{
+			for (int i = 0; i < iterations; i++)
+			{	
+				int from = randomGenerator(engine);
+				int to = randomGenerator(engine);
+				result = graph->get_shortest_path(from, to);
+			}
 		}
+		total_time += timer.get_millis();
 	}
-	timer.print("Time " + alg + " (" + type + ")");
+
+	std::cout << "Time " + alg + " (" + type + ") " << (total_time / checkIterations) << " ms" << std::endl;
 
 	delete graph;
 }
@@ -158,6 +165,15 @@ int main(int argc, char** argv)
 
 	/*long times[3] = { 0 };
 	const size_t ITERATION_COUNT = 30;
+	std::default_random_engine engine(1);
+	std::uniform_int_distribution<int> randomGenerator(0, (int) vertices.size() - 1);
+
+	GraphCPU cpu;
+	cpu.vertices = vertices;
+	GraphCUDA g;
+	g.vertices = vertices;
+	GraphHarnar harnar;
+	harnar.vertices = vertices;
 
 	for (int i = 0; i < ITERATION_COUNT; i++)
 	{
@@ -165,15 +181,15 @@ int main(int argc, char** argv)
 		int to = randomGenerator(engine);
 		
 		Timer timer;
-		unsigned int resultCPU = cpu.get_shortest_path(from, to);
+		unsigned int resultCPU = cpu.is_connected(from, to);
 		times[0] += timer.get_millis();
 		
 		timer.start();
-		unsigned int resultHarnar = harnar.get_shortest_path(from, to);
+		unsigned int resultHarnar = harnar.is_connected(from, to);
 		times[2] += timer.get_millis();
 
 		timer.start();
-		unsigned int resultGPU = g.get_shortest_path(from, to);
+		unsigned int resultGPU = g.is_connected(from, to);
 		times[1] += timer.get_millis();
 
 		if (resultGPU != resultCPU)
@@ -191,8 +207,7 @@ int main(int argc, char** argv)
 	std::cout << "GPU average: " << (times[1] / ITERATION_COUNT) << std::endl;
 	std::cout << "Harnar average: " << (times[2] / ITERATION_COUNT) << std::endl;
 	
-	getchar();
-	*/
+	getchar();*/
 
    	return 0;
 }

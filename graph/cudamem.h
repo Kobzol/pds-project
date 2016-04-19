@@ -25,7 +25,7 @@ class CudaMemory
 public:
 	CudaMemory(size_t count = 1, T* mem = nullptr) : count(count)
 	{
-		CHECK_CUDA_CALL(cudaMalloc(&this->devicePtr, sizeof(T) * count));
+		CHECK_CUDA_CALL(cudaMalloc(&this->devicePointer, sizeof(T) * count));
 
 		if (mem)
 		{
@@ -34,22 +34,26 @@ public:
 	}
 	CudaMemory(size_t count, T value) : count(count)
 	{
-		CHECK_CUDA_CALL(cudaMalloc(&this->devicePtr, sizeof(T) * count));
-		CHECK_CUDA_CALL(cudaMemset(this->devicePtr, value, sizeof(T) * count));
+		CHECK_CUDA_CALL(cudaMalloc(&this->devicePointer, sizeof(T) * count));
+		CHECK_CUDA_CALL(cudaMemset(this->devicePointer, value, sizeof(T) * count));
 	}
 	~CudaMemory()
 	{
-		CHECK_CUDA_CALL(cudaFree(this->devicePtr));
-		this->devicePtr = nullptr;
+		CHECK_CUDA_CALL(cudaFree(this->devicePointer));
+		this->devicePointer = nullptr;
 	}
 
 	CudaMemory(const CudaMemory& other) = delete;
 	CudaMemory& operator=(const CudaMemory& other) = delete;
 	CudaMemory(CudaMemory&& other) = delete;
 
-	T* operator*()
+	T* operator*() const
 	{
-		return this->devicePtr;
+		return this->devicePointer;
+	}
+	T* device() const
+	{
+		return this->devicePointer;
 	}
 
 	void load(T& dest, size_t count = 1) const
@@ -59,7 +63,7 @@ public:
 			count = this->count;
 		}
 
-		CHECK_CUDA_CALL(cudaMemcpy(&dest, this->devicePtr, sizeof(T) * count, cudaMemcpyDeviceToHost));
+		CHECK_CUDA_CALL(cudaMemcpy(&dest, this->devicePointer, sizeof(T) * count, cudaMemcpyDeviceToHost));
 	}
 	void store(const T& src, size_t count = 1, size_t start_index = 0)
 	{
@@ -68,11 +72,11 @@ public:
 			count = this->count;
 		}
 
-		CHECK_CUDA_CALL(cudaMemcpy(this->devicePtr + start_index, &src, sizeof(T) * count, cudaMemcpyHostToDevice));
+		CHECK_CUDA_CALL(cudaMemcpy(this->devicePointer + start_index, &src, sizeof(T) * count, cudaMemcpyHostToDevice));
 	}
 
 private:
-	T* devicePtr = nullptr;
+	T* devicePointer = nullptr;
 	size_t count;
 };
 

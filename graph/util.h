@@ -14,13 +14,13 @@ public:
 
 	long get_millis()
 	{
-		auto timeDiff = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - this->timer);
+		auto timeDiff = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now() - this->timer);
 		return (long) timeDiff.count();
 	}
 
 	void start()
 	{
-		this->timer = std::chrono::steady_clock::now();
+		this->timer = std::chrono::system_clock::now();
 	}
 	void print(std::string note="")
 	{
@@ -28,9 +28,5 @@ public:
 	}
 
 private:
-#ifdef _WIN32
 	std::chrono::time_point<std::chrono::system_clock> timer;
-#else
-	std::chrono::time_point<std::chrono::steady_clock> timer;
-#endif	
 };
