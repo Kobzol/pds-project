@@ -44,3 +44,6 @@
 *.thm
 *.tcp
 *.tps
+*.dpth
+*.md5
+*.auxlock
